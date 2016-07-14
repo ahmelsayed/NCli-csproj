@@ -9,12 +9,12 @@ namespace NCli
     {
         public static IDependencyResolver DependencyResolver { get; set; }
 
-        public static IVerb Parse(string[] args, Type defaultType)
+        public static IVerb Parse(string[] args)
         {
-            return Parse(args, defaultType, Assembly.GetEntryAssembly());
+            return Parse(args, Assembly.GetEntryAssembly());
         }
 
-        public static IVerb Parse(string[] args, Type defaultType, Assembly assembly)
+        public static IVerb Parse(string[] args, Assembly assembly)
         {
             if (args == null)
             {
@@ -24,21 +24,18 @@ namespace NCli
             {
                 throw new ArgumentNullException(nameof(assembly));
             }
-            else if (!typeof(IVerb).IsAssignableFrom(defaultType))
-            {
-                throw new ArgumentException($"Argument ({nameof(defaultType)}) should be a type that implements IVerb.");
-            }
 
             var verbTypes = assembly.GetTypes().Where(t => typeof(IVerb).IsAssignableFrom(t));
             var verbs = verbTypes.Zip(verbTypes.Select(TypeToAttribute), (t, a) => new { type = t, attribute = a });
 
             if (args.Length == 0)
             {
-                return InstantiateType<IVerb>(defaultType);
+                args = new[] { "help" };
             }
 
             var verbType = verbs.Single(v => v.attribute.Names.Any(n => n.Equals(args[0], StringComparison.OrdinalIgnoreCase)));
             var verb = InstantiateType<IVerb>(verbType.type);
+            verb.OriginalVerb = args[0];
             if (args.Length == 1)
             {
                 return verb;
@@ -59,19 +56,19 @@ namespace NCli
                 }
             }
 
-            var orderedOptions = new Stack<PropertyInfo>(options.Where(o => o.attribute._order != -1).OrderBy(o => o.attribute._order).Select(o => o.property).ToArray());
+            var orderedOptions = new Stack<PropertyInfo>(options.Where(o => o.attribute._order != -1).OrderBy(o => o.attribute._order).Select(o => o.property).Reverse().ToArray());
+            object value;
+            while (stack.Any() && orderedOptions.Any())
+            {
+                var orderedOption = orderedOptions.Pop();
+                if (TryParseOption(orderedOption, stack, out value))
+                {
+                    orderedOption.SetValue(verb, value);
+                }
+            }
 
             while (stack.Any())
             {
-                object value;
-                while (orderedOptions.Any())
-                {
-                    var orderedOption = orderedOptions.Pop();
-                    if (TryParseOption(orderedOption, stack, out value))
-                    {
-                        orderedOption.SetValue(verb, value);
-                    }
-                }
                 if (!stack.Any()) break;
                 var arg = stack.Pop();
                 PropertyInfo option = null;
@@ -100,14 +97,15 @@ namespace NCli
         private static bool TryParseOption(PropertyInfo option, Stack<string> args, out object value)
         {
             value = null;
-            var values = new List<object>();
             if (option.PropertyType.IsGenericEnumerable())
             {
+                var genericType = option.PropertyType.GetEnumerableType();
+                var values = genericType.CreateList();
                 while (args.Any() && !args.Peek().StartsWith("-"))
                 {
                     var arg = args.Pop();
                     object temp;
-                    if (TryCast(arg, option.PropertyType.GetEnumerableType(), out temp))
+                    if (TryCast(arg, genericType, out temp))
                     {
                         values.Add(temp);
                     }
@@ -117,8 +115,8 @@ namespace NCli
                         break;
                     }
                 }
-                value = values.AsEnumerable();
-                return values.Any();
+                value = values;
+                return values.Count != 0;
             }
             else if (option.PropertyType == typeof(bool))
             {
@@ -129,7 +127,7 @@ namespace NCli
             {
                 var arg = args.Pop();
                 object temp;
-                if (TryCast(arg, option.PropertyType, out temp))
+                if (!arg.StartsWith("-")  && TryCast(arg, option.PropertyType, out temp))
                 {
                     value = temp;
                     return true;
@@ -149,7 +147,7 @@ namespace NCli
             {
                 if (type.GetTypeInfo().IsEnum)
                 {
-                    obj = Enum.Parse(type, arg);
+                    obj = Enum.Parse(type, arg, ignoreCase: true);
                 }
                 else if (type == typeof(string))
                 {
@@ -169,9 +167,10 @@ namespace NCli
                 }
                 return obj != null;
             }
-            catch
+            catch (Exception e)
             {
                 Console.WriteLine($"Unable to parse ({arg}) as {type.Name}");
+                var s = e;
                 return false;
             }
         }

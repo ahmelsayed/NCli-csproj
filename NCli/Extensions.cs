@@ -1,7 +1,6 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 
 namespace NCli
 {
@@ -9,12 +8,26 @@ namespace NCli
     {
         public static bool IsGenericEnumerable(this Type type)
         {
-            return typeof(IEnumerable<>).IsAssignableFrom(type);
+            return type.IsGenericType && typeof(IEnumerable).IsAssignableFrom(type);
         }
 
         public static Type GetEnumerableType(this Type type)
         {
-            return type.GetGenericArguments().First();
+            var genericArguments = type.GetGenericArguments();
+            if (type.IsGenericType && genericArguments.Length > 0)
+            {
+                return type.GetGenericArguments()[0];
+            }
+            else
+            {
+                return null;
+            }
+        }
+
+        public static IList CreateList(this Type myType)
+        {
+            var genericListType = typeof(List<>).MakeGenericType(myType);
+            return (IList)Activator.CreateInstance(genericListType);
         }
     }
 }

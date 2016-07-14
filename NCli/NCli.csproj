@@ -43,6 +43,8 @@
     <Compile Include="ArgsParser.cs" />
     <Compile Include="Constants.cs" />
     <Compile Include="Extensions.cs" />
+    <Compile Include="HelpLine.cs" />
+    <Compile Include="HelpText.cs" />
     <Compile Include="IDependencyResolver.cs" />
     <Compile Include="IVerb.cs" />
     <Compile Include="OptionAttribute.cs" />
