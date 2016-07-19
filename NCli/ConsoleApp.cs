@@ -1,47 +1,53 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using System.Threading.Tasks;
 
 namespace NCli
 {
-    public static class ArgsParser
+    public class ConsoleApp
     {
-        public static IDependencyResolver DependencyResolver { get; set; }
-
-        public static IVerb Parse(string[] args)
+        public static Task RunAsync<T>(string[] args, IDependencyResolver dependencyResolver = null)
         {
-            return Parse(args, Assembly.GetEntryAssembly());
+            var app = new ConsoleApp(args, dependencyResolver);
+            var verb = app.Parse(typeof(T).Assembly);
+            return verb.Run();
         }
 
-        public static IVerb Parse(string[] args, Assembly assembly)
+        public static void Run<T>(string[] args, IDependencyResolver dependencyResolver = null)
         {
-            if (args == null)
-            {
-                throw new ArgumentNullException(nameof(args));
-            }
-            else if (assembly == null)
-            {
-                throw new ArgumentNullException(nameof(assembly));
-            }
+            Task.Run(() => RunAsync<T>(args, dependencyResolver)).Wait();
+        }
 
+        private readonly IDependencyResolver _dependencyResolver;
+        private readonly string[] _args;
+
+        internal ConsoleApp(string[] args, IDependencyResolver dependencyResolver)
+        {
+            _args = args ?? new string[1] { "help" };
+            _dependencyResolver = dependencyResolver;
+        }
+
+        internal IVerb Parse()
+        {
+            return Parse(Assembly.GetEntryAssembly());
+        }
+
+        internal IVerb Parse(Assembly assembly)
+        {
             var verbTypes = assembly.GetTypes().Where(t => typeof(IVerb).IsAssignableFrom(t));
             var verbs = verbTypes.Zip(verbTypes.Select(TypeToAttribute), (t, a) => new { type = t, attribute = a });
-
-            if (args.Length == 0)
-            {
-                args = new[] { "help" };
-            }
-
-            var verbType = verbs.Single(v => v.attribute.Names.Any(n => n.Equals(args[0], StringComparison.OrdinalIgnoreCase)));
+            var verbType = verbs.Single(v => v.attribute.Names.Any(n => n.Equals(_args[0], StringComparison.OrdinalIgnoreCase)));
             var verb = InstantiateType<IVerb>(verbType.type);
-            verb.OriginalVerb = args[0];
-            if (args.Length == 1)
+            verb.OriginalVerb = _args[0];
+            if (_args.Length == 1)
             {
                 return verb;
             }
 
-            var stack = new Stack<string>(args.Skip(1).Reverse());
+            var stack = new Stack<string>(_args.Skip(1).Reverse());
 
             var options = verbType.type.
                 GetProperties()
@@ -83,7 +89,7 @@ namespace NCli
 
                 if (option == null)
                 {
-                    throw new ParseException($"Unable to find option {arg} on {args[0]}");
+                    throw new ParseException($"Unable to find option {arg} on {_args[0]}");
                 }
 
                 if (TryParseOption(option, stack, out value))
@@ -127,7 +133,7 @@ namespace NCli
             {
                 var arg = args.Pop();
                 object temp;
-                if (!arg.StartsWith("-")  && TryCast(arg, option.PropertyType, out temp))
+                if (!arg.StartsWith("-") && TryCast(arg, option.PropertyType, out temp))
                 {
                     value = temp;
                     return true;
@@ -200,10 +206,10 @@ namespace NCli
             }
         }
 
-        private static T InstantiateType<T>(Type type)
+        private T InstantiateType<T>(Type type)
         {
             var ctor = type.GetConstructors().SingleOrDefault();
-            var args = ctor?.GetParameters().Select(p => DependencyResolver.GetService(p.ParameterType)).ToArray();
+            var args = ctor?.GetParameters().Select(p => ResolveType(p.ParameterType)).ToArray();
             if (args == null || args.Length == 0)
             {
                 return (T)Activator.CreateInstance(type);
@@ -211,6 +217,18 @@ namespace NCli
             else
             {
                 return (T)Activator.CreateInstance(type, args);
+            }
+        }
+
+        private object ResolveType(Type type)
+        {
+            if (type == typeof(HelpText))
+            {
+                return new HelpText { new HelpLine { Value = "Not Implemented Yet", Level = TraceLevel.Error } };
+            }
+            else
+            {
+                return _dependencyResolver?.GetService(type);
             }
         }
     }

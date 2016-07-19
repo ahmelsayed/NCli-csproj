@@ -6,6 +6,8 @@ namespace NCli
     {
         string OriginalVerb { get; set; }
 
+        IDependencyResolver DependencyResolver { get; set; }
+
         Task Run();
     }
 }
