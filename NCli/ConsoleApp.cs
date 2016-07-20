@@ -11,8 +11,8 @@ namespace NCli
     {
         public static Task RunAsync<T>(string[] args, IDependencyResolver dependencyResolver = null)
         {
-            var app = new ConsoleApp(args, dependencyResolver);
-            var verb = app.Parse(typeof(T).Assembly);
+            var app = new ConsoleApp(args, typeof(T).Assembly, dependencyResolver);
+            var verb = app.Parse();
             return verb.Run();
         }
 
@@ -23,25 +23,26 @@ namespace NCli
 
         private readonly IDependencyResolver _dependencyResolver;
         private readonly string[] _args;
+        private readonly IEnumerable<TypePair<VerbAttribute>> _verbs;
+        private readonly string _cliName;
 
-        internal ConsoleApp(string[] args, IDependencyResolver dependencyResolver)
+        internal ConsoleApp(string[] args, Assembly assembly, IDependencyResolver dependencyResolver)
         {
-            _args = args ?? new string[1] { "help" };
+            _args = args?.Length < 1 ? new string[1] { "help" } : args;
             _dependencyResolver = dependencyResolver;
+            _cliName = Process.GetCurrentProcess().ProcessName;
+            _verbs = assembly
+                .GetTypes()
+                .Where(t => typeof(IVerb).IsAssignableFrom(t) && !t.IsAbstract)
+                .Select(t => new TypePair<VerbAttribute> { Type = t, Attribute = TypeToAttribute(t) });
         }
 
         internal IVerb Parse()
         {
-            return Parse(Assembly.GetEntryAssembly());
-        }
-
-        internal IVerb Parse(Assembly assembly)
-        {
-            var verbTypes = assembly.GetTypes().Where(t => typeof(IVerb).IsAssignableFrom(t));
-            var verbs = verbTypes.Zip(verbTypes.Select(TypeToAttribute), (t, a) => new { type = t, attribute = a });
-            var verbType = verbs.Single(v => v.attribute.Names.Any(n => n.Equals(_args[0], StringComparison.OrdinalIgnoreCase)));
-            var verb = InstantiateType<IVerb>(verbType.type);
+            var verbType = GetVerbType(_args[0]);
+            var verb = InstantiateType<IVerb>(verbType?.Type);
             verb.OriginalVerb = _args[0];
+            verb.DependencyResolver = _dependencyResolver;
             if (_args.Length == 1)
             {
                 return verb;
@@ -49,20 +50,15 @@ namespace NCli
 
             var stack = new Stack<string>(_args.Skip(1).Reverse());
 
-            var options = verbType.type.
-                GetProperties()
-                .Select(p => new { property = p, attribute = p.GetCustomAttribute<OptionAttribute>() })
-                .Where(a => a.attribute != null);
-
-            foreach (var option in options)
+            foreach (var option in verbType.Options)
             {
-                if (option.attribute.DefaultValue != null)
+                if (option.Attribute.DefaultValue != null)
                 {
-                    option.property.SetValue(verb, option.attribute.DefaultValue);
+                    option.PropertyInfo.SetValue(verb, option.Attribute.DefaultValue);
                 }
             }
 
-            var orderedOptions = new Stack<PropertyInfo>(options.Where(o => o.attribute._order != -1).OrderBy(o => o.attribute._order).Select(o => o.property).Reverse().ToArray());
+            var orderedOptions = new Stack<PropertyInfo>(verbType.Options.Where(o => o.Attribute._order != -1).OrderBy(o => o.Attribute._order).Select(o => o.PropertyInfo).Reverse().ToArray());
             object value;
             while (stack.Any() && orderedOptions.Any())
             {
@@ -80,11 +76,11 @@ namespace NCli
                 PropertyInfo option = null;
                 if (arg.StartsWith("--", StringComparison.OrdinalIgnoreCase))
                 {
-                    option = options.SingleOrDefault(o => o.attribute._longName.Equals(arg.Substring(2), StringComparison.OrdinalIgnoreCase))?.property;
+                    option = verbType.Options.SingleOrDefault(o => o.Attribute._longName.Equals(arg.Substring(2), StringComparison.OrdinalIgnoreCase))?.PropertyInfo;
                 }
                 else if (arg.StartsWith("-", StringComparison.OrdinalIgnoreCase) && arg.Length == 2)
                 {
-                    option = options.SingleOrDefault(o => o.attribute._shortName.ToString().Equals(arg.Substring(1), StringComparison.OrdinalIgnoreCase))?.property;
+                    option = verbType.Options.SingleOrDefault(o => o.Attribute._shortName.ToString().Equals(arg.Substring(1), StringComparison.OrdinalIgnoreCase))?.PropertyInfo;
                 }
 
                 if (option == null)
@@ -98,6 +94,11 @@ namespace NCli
                 }
             }
             return verb;
+        }
+
+        private TypePair<VerbAttribute> GetVerbType(string verbName)
+        {
+            return _verbs.SingleOrDefault(p => p.Attribute.Names.Any(n => n.Equals(verbName, StringComparison.OrdinalIgnoreCase)));
         }
 
         private static bool TryParseOption(PropertyInfo option, Stack<string> args, out object value)
@@ -185,7 +186,8 @@ namespace NCli
         {
             var attribute = type.GetTypeInfo().GetCustomAttribute<VerbAttribute>();
             var verbIndex = type.Name.LastIndexOf("verb", StringComparison.OrdinalIgnoreCase);
-            var verbName = verbIndex == -1 ? type.Name : type.Name.Substring(0, verbIndex);
+            var verbName = verbIndex == -1 || verbIndex == 0 ? type.Name : type.Name.Substring(0, verbIndex);
+            verbName = verbName.ToLowerInvariant();
 
             if (attribute == null)
             {
@@ -196,7 +198,7 @@ namespace NCli
                 return new VerbAttribute(verbName)
                 {
                     HelpText = attribute.HelpText,
-                    Show = attribute.Show,
+                    ShowInHelp = attribute.ShowInHelp,
                     Usage = attribute.Usage
                 };
             }
@@ -224,11 +226,52 @@ namespace NCli
         {
             if (type == typeof(HelpText))
             {
-                return new HelpText { new HelpLine { Value = "Not Implemented Yet", Level = TraceLevel.Error } };
+                return new HelpText(BuildHelp());
+               
             }
             else
             {
                 return _dependencyResolver?.GetService(type);
+            }
+        }
+
+        private IEnumerable<HelpLine> BuildHelp()
+        {
+            if (_args.Length > 1)
+            {
+                var verb = GetVerbType(_args[1]);
+                if (verb != null)
+                {
+                    yield return new HelpLine { Value = $"Usage: {_cliName} {verb.Attribute.Usage} [Options]", Level = TraceLevel.Info };
+                    yield return new HelpLine { Value = "\t", Level = TraceLevel.Info };
+
+                    var longestOption = verb.Options.Select(s => s.Attribute.GetUsage(s.PropertyInfo.Name)).Select(s => s.Length).Max();
+                    foreach (var option in verb.Options)
+                    {
+                        yield return new HelpLine { Value = string.Format($"   {{0, {-longestOption}}} {{1}}", option.Attribute.GetUsage(option.PropertyInfo.Name), option.Attribute.HelpText), Level = TraceLevel.Info };
+                    }
+                    yield break;
+                }
+            }
+
+            foreach (var help in GeneralHelp())
+            {
+                yield return help;
+            }
+        }
+
+        private IEnumerable<HelpLine> GeneralHelp()
+        {
+            yield return new HelpLine { Value = $"Usage: {_cliName} [verb] [Options]", Level = TraceLevel.Info };
+            yield return new HelpLine { Value = "\t", Level = TraceLevel.Info };
+
+            var longestName = _verbs.Select(p => p.Attribute).Max(v => v.Names.Max(n => n.Length));
+            foreach (var verb in _verbs)
+            {
+                foreach (var name in verb.Attribute.Names)
+                {
+                    yield return new HelpLine { Value = string.Format($"   {{0, {-longestName}}}  {{1}}", name, verb.Attribute.HelpText), Level = TraceLevel.Info };
+                }
             }
         }
     }

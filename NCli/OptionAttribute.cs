@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text;
 using static NCli.Constants;
 
 namespace NCli
@@ -27,6 +28,32 @@ namespace NCli
         public OptionAttribute(int order) : this(NullCharacter, string.Empty)
         {
             _order = order;
+        }
+
+        internal string GetUsage(string propertyName)
+        {
+            if (_order != -1)
+            {
+                return $"<{char.ToLowerInvariant(propertyName[0]) + propertyName.Substring(1)}>";
+            }
+
+            var builder = new StringBuilder();
+
+            if (_shortName != NullCharacter)
+            {
+                builder.Append($"-{_shortName}");
+            }
+
+            if (!string.IsNullOrEmpty(_longName))
+            {
+                if (builder.Length != 0)
+                {
+                    builder.Append("/");
+                }
+                builder.Append($"--{_longName}");
+            }
+
+            return builder.ToString();
         }
     }
 }

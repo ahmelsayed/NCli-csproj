@@ -6,7 +6,7 @@ namespace NCli
     {
         public string HelpText { get; set; }
         public string Usage { get; set; }
-        public bool Show { get; set; } = true;
+        public bool ShowInHelp { get; set; } = true;
         internal string[] Names { get; }
         public VerbAttribute(params string[] names)
         {
