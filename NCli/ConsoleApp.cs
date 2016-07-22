@@ -227,7 +227,6 @@ namespace NCli
             if (type == typeof(HelpText))
             {
                 return new HelpText(BuildHelp());
-               
             }
             else
             {
@@ -266,7 +265,7 @@ namespace NCli
             yield return new HelpLine { Value = "\t", Level = TraceLevel.Info };
 
             var longestName = _verbs.Select(p => p.Attribute).Max(v => v.Names.Max(n => n.Length));
-            foreach (var verb in _verbs)
+            foreach (var verb in _verbs.Where(v => v.Attribute.ShowInHelp))
             {
                 foreach (var name in verb.Attribute.Names)
                 {
