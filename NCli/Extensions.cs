@@ -4,7 +4,7 @@ using System.Collections.Generic;
 
 namespace NCli
 {
-    public static class Extensions
+    internal static class Extensions
     {
         public static bool IsGenericEnumerable(this Type type)
         {
