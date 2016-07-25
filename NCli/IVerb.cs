@@ -8,6 +8,6 @@ namespace NCli
 
         IDependencyResolver DependencyResolver { get; set; }
 
-        Task Run();
+        Task RunAsync();
     }
 }

@@ -13,7 +13,7 @@ namespace NCli
         {
             var app = new ConsoleApp(args, typeof(T).Assembly, dependencyResolver);
             var verb = app.Parse();
-            return verb.Run();
+            return verb.RunAsync();
         }
 
         public static void Run<T>(string[] args, IDependencyResolver dependencyResolver = null)
