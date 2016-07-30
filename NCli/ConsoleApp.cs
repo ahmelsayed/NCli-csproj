@@ -39,8 +39,8 @@ namespace NCli
 
         internal IVerb Parse()
         {
-            var verbType = GetVerbType(_args[0]);
-            var verb = InstantiateType<IVerb>(verbType?.Type);
+            var verbType = GetVerbType(_args[0]) ?? GetVerbType("help");
+            var verb = InstantiateType<IVerb>(verbType.Type);
             verb.OriginalVerb = _args[0];
             verb.DependencyResolver = _dependencyResolver;
             if (_args.Length == 1)
@@ -210,8 +210,8 @@ namespace NCli
 
         private T InstantiateType<T>(Type type)
         {
-            var ctor = type.GetConstructors().SingleOrDefault();
-            var args = ctor?.GetParameters().Select(p => ResolveType(p.ParameterType)).ToArray();
+            var ctor = type?.GetConstructors()?.SingleOrDefault();
+            var args = ctor?.GetParameters()?.Select(p => ResolveType(p.ParameterType)).ToArray();
             if (args == null || args.Length == 0)
             {
                 return (T)Activator.CreateInstance(type);
