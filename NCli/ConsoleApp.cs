@@ -152,6 +152,8 @@ namespace NCli
             obj = null;
             try
             {
+                type = Nullable.GetUnderlyingType(type) ?? type;
+
                 if (type.GetTypeInfo().IsEnum)
                 {
                     obj = Enum.Parse(type, arg, ignoreCase: true);
@@ -174,10 +176,9 @@ namespace NCli
                 }
                 return obj != null;
             }
-            catch (Exception e)
+            catch
             {
                 Console.WriteLine($"Unable to parse ({arg}) as {type.Name}");
-                var s = e;
                 return false;
             }
         }
